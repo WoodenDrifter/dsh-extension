@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "拓展",
+    "description": "在侧栏加一个「拓展」面板，查看并一键重启本机浏览器扩展 bsk 的 daemon"
+  }
+}

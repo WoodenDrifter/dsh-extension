@@ -1,0 +1,42 @@
+{
+  "name": "dsh-extension",
+  "version": "1.1.0",
+  "description": "为 dsh web 侧栏添加「拓展」面板：查看 bsk 浏览器扩展守护进程状态并一键重启。",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "bsk",
+    "browser-extension"
+  ],
+  "files": [
+    "src/",
+    "locale/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  }
+}

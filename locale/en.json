@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "拓展",
+    "description": "Adds an Extensions panel to the sidebar for inspecting and restarting the local bsk browser-extension daemon"
+  }
+}

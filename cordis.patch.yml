@@ -1,0 +1,5 @@
+# dsh-extension bundle layer: 往 web profile 里插入一行插件。
+# id 可以任意取（需唯一），name 必须与 package.json 的 name 完全一致。
+- insert:
+    - id: dsh-extension
+      name: dsh-extension
