@@ -56,7 +56,7 @@ if (hub) hub.register(item) // 返回 dispose
 
 ## 已注册的插件
 
-- [`dsh-bsk-daemon`](https://github.com/WoodenDrifter/dsh-bsk-daemon) —— 浏览器技能（bsk）的 daemon 管理
+- `dsh-bsk-daemon` —— 浏览器技能（bsk）的 daemon 管理（状态 / 重启 / 版本）
 
 ## License
 
