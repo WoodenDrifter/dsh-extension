@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Extensions",
-    "description": "A sidebar shelf that collects small features, with collapsible groups, drag-to-reorder, per-plugin switches and search"
+    "description": "A sidebar shelf that collects small features into one flat list, with collapsible cards, drag-to-reorder, per-plugin switches and search"
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "dsh-extension",
-  "version": "2.0.0",
-  "description": "为 dsh web 侧栏提供「拓展」面板：一个用来放置各种小功能的集合容器，支持分组折叠、拖拽排序、插件开关与中英文搜索。功能由其它插件注册进来。",
+  "version": "2.0.1",
+  "description": "为 dsh web 侧栏提供「拓展」面板：一个用来放置各种小功能的集合容器，卡片平铺成一列，支持折叠、拖拽排序、插件开关与中英文搜索。功能由其它插件注册进来。",
   "type": "module",
   "license": "MIT",
   "keywords": [

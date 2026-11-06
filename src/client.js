@@ -3,7 +3,7 @@
 // 这个包本身不带任何功能，只提供一块面板和一个注册契约：
 //   ctx.provide('extensionHub', { version, register(item), list(), subscribe(fn) })
 // 其它插件（例如 dsh-bsk-daemon）把自己的卡片注册进来，这里统一负责
-// 分组、折叠、拖拽排序、开关、搜索和持久化。
+// 折叠、拖拽排序、开关、搜索和持久化。所有卡片平铺成一条列表，不分分类。
 //
 // Bundle 格式（client-modules 协议）：经典脚本，通过 window.__ModuleLoader__.load
 // 注册工厂；工厂拿到 require，返回 { apply, inject }。不用 JSX。
@@ -16,7 +16,7 @@ window.__ModuleLoader__.load({
 
     const NS = 'dsh-extension'
     const PANEL_ID = 'dsh-extension'
-    const STORE_KEY = 'dsh-extension.state.v1'
+    const STORE_KEY = 'dsh-extension.state.v2'
 
     // dsh 真实主题 token（--dsw-alias-* 家族）；每个都带兜底，浅色主题也能跟随
     const C = {
@@ -36,8 +36,6 @@ window.__ModuleLoader__.load({
       mono: 'var(--dsw-font-markdown-code-font-family, ui-monospace, Consolas, monospace)',
     }
 
-    const GENERAL_GROUP = 'general'
-    const DEFAULT_GROUP_NAME = { zh: '通用', en: 'General' }
     const SCOPES = [
       { id: 'all', zh: '全部', en: 'All' },
       { id: 'name', zh: '名称', en: 'Name' },
@@ -87,18 +85,17 @@ window.__ModuleLoader__.load({
 
     // ---------------- 持久化 ----------------
     function loadState() {
-      const base = { order: {}, collapsed: {}, scope: 'all', snapshot: {}, groupOrder: [], disabled: {} }
+      const base = { order: [], collapsed: {}, scope: 'all', snapshot: {}, disabled: {} }
       try {
         const raw = localStorage.getItem(STORE_KEY)
         if (!raw) return base
         const parsed = JSON.parse(raw)
         if (!parsed || typeof parsed !== 'object') return base
         return {
-          order: parsed.order && typeof parsed.order === 'object' ? parsed.order : {},
+          order: Array.isArray(parsed.order) ? parsed.order.filter((x) => typeof x === 'string') : [],
           collapsed: parsed.collapsed && typeof parsed.collapsed === 'object' ? parsed.collapsed : {},
           scope: SCOPES.some((s) => s.id === parsed.scope) ? parsed.scope : 'all',
           snapshot: parsed.snapshot && typeof parsed.snapshot === 'object' ? parsed.snapshot : {},
-          groupOrder: Array.isArray(parsed.groupOrder) ? parsed.groupOrder : [],
           disabled: parsed.disabled && typeof parsed.disabled === 'object' ? parsed.disabled : {},
         }
       } catch {
@@ -121,19 +118,6 @@ window.__ModuleLoader__.load({
     function pick(text, lang) {
       if (!text) return ''
       return (lang === 'en' ? text.en || text.zh : text.zh || text.en) || ''
-    }
-
-    function groupIdOf(item) {
-      const g = item.group
-      if (typeof g === 'string' && g) return g
-      if (g && typeof g === 'object' && typeof g.id === 'string' && g.id) return g.id
-      return GENERAL_GROUP
-    }
-
-    function groupNameOf(item) {
-      const g = item.group
-      if (g && typeof g === 'object' && g.name) return g.name
-      return null
     }
 
     // ---------------- 原子组件 ----------------
@@ -372,7 +356,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState(null)
       const [dragId, setDragId] = useState(null)
       const [over, setOver] = useState(null)
-      const viewRef = useRef({ groups: [], order: {} })
+      const viewRef = useRef({ ids: [] })
 
       const plugins = usePluginRows(ctx, tick)
 
@@ -407,8 +391,6 @@ window.__ModuleLoader__.load({
           const rec = {
             name: item.name || {},
             desc: item.desc || {},
-            group: typeof item.group === 'string' ? item.group : item.group && item.group.id ? item.group : undefined,
-            groupName: groupNameOf(item) || undefined,
             order: item.order || 0,
             pluginName: item.pluginName || undefined,
           }
@@ -428,54 +410,23 @@ window.__ModuleLoader__.load({
       const all = useMemo(() => registered.concat(placeholders), [version, placeholders])
 
       // 视觉顺序：先按持久化的 order 数组，再按 item.order
-      const groups = useMemo(() => {
+      const list = useMemo(() => {
         const q = query.trim().toLowerCase()
-        const map = new Map()
-        for (const item of all) {
-          const gid = groupIdOf(item)
-          if (!map.has(gid)) map.set(gid, { id: gid, name: groupNameOf(item) || DEFAULT_GROUP_NAME, items: [], minOrder: Infinity })
-          const g = map.get(gid)
-          g.items.push(item)
-          g.minOrder = Math.min(g.minOrder, item.order || 0)
-        }
-        for (const g of map.values()) {
-          const order = P.data.order[g.id] || []
-          g.items.sort((a, b) => {
-            const ia = order.indexOf(a.id)
-            const ib = order.indexOf(b.id)
-            if (ia >= 0 && ib >= 0) return ia - ib
-            if (ia >= 0) return -1
-            if (ib >= 0) return 1
-            return (a.order || 0) - (b.order || 0)
-          })
-          const before = g.items
-          if (q) {
-            g.items = g.items.filter((item) => matchItem(item, q, scope, lang))
-            g.matched = g.items.length
-            g.hidden = g.items.length === 0
-          } else {
-            g.hidden = false
-          }
-          g.count = q ? g.items.length : before.length
-          g.orderIdx = P.data.groupOrder.indexOf(g.id)
-          if (g.orderIdx < 0) g.orderIdx = 1000 + g.minOrder
-          const groupCollapsed = P.data.collapsed[`g:${g.id}`] === true
-          g.collapsed = q ? false : groupCollapsed
-        }
-        const list = Array.from(map.values()).filter((g) => !g.hidden)
-        list.sort((a, b) => a.orderIdx - b.orderIdx || a.minOrder - b.minOrder)
-        return list
+        const sorted = all.slice().sort((a, b) => {
+          const ia = P.data.order.indexOf(a.id)
+          const ib = P.data.order.indexOf(b.id)
+          if (ia >= 0 && ib >= 0) return ia - ib
+          if (ia >= 0) return -1
+          if (ib >= 0) return 1
+          return (a.order || 0) - (b.order || 0)
+        })
+        return q ? sorted.filter((item) => matchItem(item, q, scope, lang)) : sorted
       }, [version, all, query, scope, lang])
 
-      const orderMap = useMemo(() => {
-        const m = {}
-        for (const g of groups) m[g.id] = g.items.map((i) => i.id)
-        return m
-      }, [groups])
-      viewRef.current = { groups, order: orderMap }
+      viewRef.current = { ids: list.map((i) => i.id) }
 
       const total = registered.length + placeholders.length
-      const hit = groups.reduce((n, g) => n + g.items.length, 0)
+      const hit = list.length
 
       const toggleCollapse = useCallback((key, next) => {
         P.data.collapsed[key] = next
@@ -491,23 +442,21 @@ window.__ModuleLoader__.load({
 
       // 把当前视觉顺序写回持久化数组，作为后续拖拽的基准
       const syncOrder = useCallback(() => {
-        const view = viewRef.current
-        for (const gid of Object.keys(view.order)) {
-          if (!P.data.order[gid]) P.data.order[gid] = view.order[gid].slice()
-        }
+        const ids = viewRef.current.ids
+        if (ids.length === 0) return
+        const merged = ids.slice()
+        for (const id of P.data.order) if (merged.indexOf(id) < 0) merged.push(id)
+        P.data.order = merged
       }, [])
 
       const moveItem = useCallback(
-        (id, toGroup, beforeId) => {
+        (id, beforeId) => {
           syncOrder()
-          for (const gid of Object.keys(P.data.order)) {
-            P.data.order[gid] = P.data.order[gid].filter((x) => x !== id)
-          }
-          if (!P.data.order[toGroup]) P.data.order[toGroup] = []
-          const arr = P.data.order[toGroup]
+          const arr = P.data.order.filter((x) => x !== id)
           const at = beforeId ? arr.indexOf(beforeId) : -1
           if (at >= 0) arr.splice(at, 0, id)
           else arr.push(id)
+          P.data.order = arr
           persistSoon()
           setVersion((n) => n + 1)
         },
@@ -516,17 +465,13 @@ window.__ModuleLoader__.load({
 
       const step = useCallback(
         (id, delta) => {
-          const view = viewRef.current
-          for (const g of view.groups) {
-            const ids = view.order[g.id].slice()
-            const at = ids.indexOf(id)
-            if (at < 0) continue
-            const to = at + delta
-            if (to < 0 || to >= ids.length) return
-            const before = delta < 0 ? ids[to] : ids[to + 1] || null
-            moveItem(id, g.id, before)
-            return
-          }
+          const ids = viewRef.current.ids
+          const at = ids.indexOf(id)
+          if (at < 0) return
+          const to = at + delta
+          if (to < 0 || to >= ids.length) return
+          const before = delta < 0 ? ids[to] : ids[to + 1] || null
+          moveItem(id, before)
         },
         [moveItem]
       )
@@ -578,32 +523,29 @@ window.__ModuleLoader__.load({
         [plugins]
       )
 
-      const onDropAt = useCallback(
-        (targetGroup, beforeId) => {
+      const onDropBefore = useCallback(
+        (beforeId) => {
           const id = dragId
           setDragId(null)
           setOver(null)
           if (!id) return
-          moveItem(id, targetGroup, beforeId)
+          moveItem(id, beforeId)
         },
         [dragId, moveItem]
       )
 
       // 指针落在某张卡上时：上半 → 插到它前面，下半 → 插到它后面
-      const dropBeforeId = useCallback(
-        (gid, itemId, side) => {
-          if (side === 'before') return itemId
-          const ids = viewRef.current.order[gid] || []
-          const at = ids.indexOf(itemId)
-          return at >= 0 && at + 1 < ids.length ? ids[at + 1] : null
-        },
-        []
-      )
+      const dropBeforeId = useCallback((itemId, side) => {
+        if (side === 'before') return itemId
+        const ids = viewRef.current.ids
+        const at = ids.indexOf(itemId)
+        return at >= 0 && at + 1 < ids.length ? ids[at + 1] : null
+      }, [])
 
       const renderLine = (key) =>
         h('div', { key, style: { height: 2, margin: '2px 0', borderRadius: 2, background: C.primary, opacity: 0.9 } })
 
-      const renderCard = (item, gid) => {
+      const renderCard = (item) => {
         const key = `card:${item.id}`
         const collapsed = P.data.collapsed[item.id] === true
         const expanded = query ? true : !collapsed
@@ -635,17 +577,17 @@ window.__ModuleLoader__.load({
               e.stopPropagation()
               const r = e.currentTarget.getBoundingClientRect()
               const side = e.clientY - r.top < r.height / 2 ? 'before' : 'after'
-              setOver({ group: gid, ref: item.id, side, header: false })
+              setOver({ ref: item.id, side })
             },
             onDrop: (e) => {
               e.preventDefault()
               e.stopPropagation()
-              const side = over && over.group === gid && over.ref === item.id ? over.side : 'before'
-              onDropAt(gid, dropBeforeId(gid, item.id, side))
+              const side = over && over.ref === item.id ? over.side : 'before'
+              onDropBefore(dropBeforeId(item.id, side))
             },
             style: { borderRadius: 10, opacity: ghost ? 0.62 : dragId === item.id ? 0.4 : 1 },
           },
-          over && over.group === gid && over.ref === item.id && over.side === 'before'
+          over && over.ref === item.id && over.side === 'before'
             ? renderLine(`${key}:line-before`)
             : null,
           h(
@@ -767,7 +709,7 @@ window.__ModuleLoader__.load({
                 )
               : null
           ),
-          over && over.group === gid && over.ref === item.id && over.side === 'after'
+          over && over.ref === item.id && over.side === 'after'
             ? renderLine(`${key}:line-after`)
             : null
         )
@@ -944,8 +886,8 @@ window.__ModuleLoader__.load({
             )
           : null,
 
-        // 分组
-        groups.length === 0
+        // 平铺列表：不分类，直接一张接一张
+        list.length === 0
           ? h(
               'div',
               {
@@ -975,50 +917,22 @@ window.__ModuleLoader__.load({
                     : '装一个把卡片注册到 extensionHub 的 dsh 插件，就会出现在这里。'
               )
             )
-          : groups.map((g) =>
-              h(
-                'section',
-                {
-                  key: `g:${g.id}`,
-                  onDragOver: (e) => {
-                    if (!dragId) return
-                    e.preventDefault()
-                    setOver({ group: g.id, ref: null, side: 'after', header: true })
-                  },
-                  onDrop: (e) => {
-                    e.preventDefault()
-                    if (!dragId) return
-                    onDropAt(g.id, null)
-                  },
-                  style: {
-                    marginBottom: 10,
-                    borderRadius: 12,
-                    border: `1px solid ${over && over.group === g.id && over.header ? C.primary : 'transparent'}`,
-                    transition: 'border-color .12s',
-                  },
+          : h(
+              'div',
+              {
+                onDragOver: (e) => {
+                  if (!dragId) return
+                  e.preventDefault()
                 },
-                h(
-                  'div',
-                  {
-                    onClick: () => toggleCollapse(`g:${g.id}`, !g.collapsed),
-                    style: {
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '4px 4px 8px',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                    },
-                  },
-                  h(Chevron, { open: !g.collapsed, size: 9 }),
-                  h('span', { style: { fontSize: 12, fontWeight: 600, color: C.text2 } }, pick(g.name, lang)),
-                  h('span', { style: { fontSize: 11, color: C.text3, fontFamily: C.mono } }, String(g.count)),
-                  pick(g.name, lang) === pick(DEFAULT_GROUP_NAME, lang) && groups.length > 1
-                    ? h('span', { style: { fontSize: 11, color: C.text3 } }, lang === 'en' ? '· ungrouped' : '· 未分组')
-                    : null
-                ),
-                g.collapsed ? null : h('div', null, g.items.map((item) => renderCard(item, g.id)))
-              )
+                onDrop: (e) => {
+                  // 落在卡片之间的空隙 → 挪到最后
+                  e.preventDefault()
+                  if (!dragId) return
+                  onDropBefore(null)
+                },
+                style: { display: 'flex', flexDirection: 'column' },
+              },
+              list.map((item) => renderCard(item))
             ),
 
         h(
